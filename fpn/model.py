@@ -144,48 +144,39 @@ class FCN1D(nn.Module):
             block_kernel=block_kernel,
         )
 
-        w2 = self.backbone.out_ch["C2"]
-        w3 = self.backbone.out_ch["C3"]
-        w4 = self.backbone.out_ch["C4"]
-        w5 = self.backbone.out_ch["C5"]
+        self.score_c3 = nn.Conv1d(self.backbone.out_ch["C3"], out_channels, kernel_size=1)
+        self.score_c4 = nn.Conv1d(self.backbone.out_ch["C4"], out_channels, kernel_size=1)
+        self.score_c5 = nn.Conv1d(self.backbone.out_ch["C5"], out_channels, kernel_size=1)
 
-        # Bottleneck
-        self.b = ConvBlock1D(w5, w5, kernel_size=3)
+        self.upsample2x_c5 = nn.ConvTranspose1d(out_channels, out_channels, 4, stride=2, padding=1)
+        self.upsample2x_c4 = nn.ConvTranspose1d(out_channels, out_channels, 4, stride=2, padding=1)
+        self.upsample8x_final = nn.ConvTranspose1d(out_channels, out_channels, 16, stride=8, padding=4)
 
-        # Decoder
-        self.up4 = nn.Conv1d(w5, w4, 1, bias=False)
-        self.d4 = ConvBlock1D(w4, w4, kernel_size=3)
-
-        self.up3 = nn.Conv1d(w4, w3, 1, bias=False)
-        self.d3 = ConvBlock1D(w3, w3, kernel_size=3)
-
-        self.up2 = nn.Conv1d(w3, w2, 1, bias=False)
-        self.d2 = ConvBlock1D(w2, w2, kernel_size=3)
-
-        self.out_head = nn.Conv1d(w2, out_channels, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        input_size = x.shape[-1]
+
         features = self.backbone(x)
-        c2, c3, c4, c5 = features["C2"], features["C3"], features["C4"], features["C5"]
+        c3, c4, c5 = features["C3"], features["C4"], features["C5"]
 
-        z = self.b(c5)
+        s5 = self.score_c5(c5)
+        y = self.upsample2x_c5(s5)
 
-        u4 = f.interpolate(z, size=c4.size(-1), mode="linear", align_corners=False)
-        u4 = self.up4(u4) + c4
-        u4 = self.d4(u4)
+        s4 = self.score_c4(c4)
+        y = y[..., :s4.size(-1)]
+        y = y + s4
 
-        u3 = f.interpolate(u4, size=c3.size(-1), mode="linear", align_corners=False)
-        u3 = self.up3(u3) + c3
-        u3 = self.d3(u3)
+        y = self.upsample2x_c4(y)
 
-        u2 = f.interpolate(u3, size=c2.size(-1), mode="linear", align_corners=False)
-        u2 = self.up2(u2) + c2
-        u2 = self.d2(u2)
+        s3 = self.score_c3(c3)
+        y = y[..., :s3.size(-1)]
+        y = y + s3
 
-        y = self.out_head(u2)
-        y = f.interpolate(y, size=x.size(-1), mode="linear", align_corners=False)
+        y = self.upsample8x_final(y)
+
+        y = y[..., :input_size]
+
         return y
-
 
 
 if __name__ == "__main__":
@@ -203,3 +194,5 @@ if __name__ == "__main__":
         stem_kernel=11,
         block_kernel=5,
     )
+    oo = model_light(torch.randn(BATCH, IN_CH, T_LEN))
+    print(oo.shape)
