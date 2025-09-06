@@ -165,7 +165,6 @@ class FCN1D(nn.Module):
         self.out_head = nn.Conv1d(w2, out_channels, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # 1. 인코더(Backbone)를 통해 다중 스케일 특징 추출
         features = self.backbone(x)
         c2, c3, c4, c5 = features["C2"], features["C3"], features["C4"], features["C5"]
 
