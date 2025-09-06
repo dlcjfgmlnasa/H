@@ -44,6 +44,8 @@ def get_dataset(
     train: bool = True,
     fs: int = 125,
     second: float = 5.0,
+    *,
+    down_sampling: bool = False,
     sliding_window_sec: float = 5.0,
     train_ratio: float = 0.8,
 ):
@@ -56,6 +58,7 @@ def get_dataset(
             train=train,
             fs=fs,
             second=second,
+            down_sampling=down_sampling,
             sliding_window_sec=sliding_window_sec,
             train_ratio=train_ratio,
         )

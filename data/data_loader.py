@@ -15,6 +15,7 @@ class SlidingWindowDataset(Dataset):
         base_path: str,
         signal_cols: Sequence[str],
         *,
+        down_sampling: False,
         train: bool = True,
         train_ratio: float = 0.8,
         fs: int = 125,
@@ -28,6 +29,7 @@ class SlidingWindowDataset(Dataset):
         self.window_sec = window_sec
         self.step_sec = step_sec
         self.train = train
+        self.down_sampling = down_sampling
 
         self.paths = utils.list_subdirs(base_path)
         if len(self.paths) == 0:
@@ -93,7 +95,7 @@ class SlidingWindowDataset(Dataset):
             sig_1d, m_1d = self._load_one(p)
             sig_w, m_w = self._window_one(sig_1d, m_1d)
 
-            if self.train:
+            if self.down_sampling:
                 m_w_expend = np.sum(m_w, axis=-1).astype(np.bool_)
                 for k in self.signal_cols:
                     data_chunks[k].append(sig_w[k][m_w_expend])
@@ -118,10 +120,6 @@ class SlidingWindowDataset(Dataset):
 
         data = {k: torch.tensor(v, dtype=torch.float32) for k, v in data_np.items()}
         mask = torch.tensor(mask_np, dtype=torch.long)
-
-        # --- #
-        mask[mask > 0] = 1
-        # --- #
         return data, mask
 
 
@@ -136,6 +134,7 @@ class HeartbeatDataset(SlidingWindowDataset):
         train: bool = True,
         fs: int = 125,
         second: float = 30.0,
+        down_sampling: bool = False,
         sliding_window_sec: float = 30.0,
         train_ratio: float = 0.8,
     ):
@@ -145,6 +144,7 @@ class HeartbeatDataset(SlidingWindowDataset):
             train=train,
             train_ratio=train_ratio,
             fs=fs,
+            down_sampling=down_sampling,
             window_sec=second,
             step_sec=sliding_window_sec,
         )
@@ -169,7 +169,6 @@ class AHIDataset(SlidingWindowDataset):
             fs=fs,
             window_sec=second,
             step_sec=sliding_window_sec,
-
         )
 
 
