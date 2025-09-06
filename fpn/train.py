@@ -69,37 +69,6 @@ class Trainer(object):
         # Data
         self.train_loader, self.val_loader = self._build_dataloaders()
 
-    def _build_dataloaders(self) -> Tuple[DataLoader, DataLoader]:
-        train_dataset: Dataset = get_dataset(
-            name=self.args.dataset_name,
-            train=True,
-            base_path=self.args.base_path,
-            train_ratio=0.8,
-            down_sampling=False,
-            sliding_window_sec=5.0,
-        )
-        val_dataset: Dataset = get_dataset(
-            name=self.args.dataset_name,
-            train=False,
-            base_path=self.args.base_path,
-            train_ratio=0.8,
-            down_sampling=False,
-            sliding_window_sec=5.0,
-        )
-
-        train_loader = DataLoader(
-            dataset=train_dataset,
-            batch_size=self.args.batch_size,
-            shuffle=True,
-        )
-        val_loader = DataLoader(
-            dataset=val_dataset,
-            batch_size=self.args.batch_size,
-            shuffle=False,
-            drop_last=False,
-        )
-        return train_loader, val_loader
-
     def _make_input(self, data: Dict[str, torch.Tensor]) -> torch.Tensor:
         x = torch.stack([data['ECG_1'], data['ECG_2']], dim=1)  # (B, 2, T)
         return to_device(x, self.device)
@@ -146,6 +115,38 @@ class Trainer(object):
         acc = accuracy_score(y_true, y_pred)
         iou_macro, dice_macro = result['iou_macro'], result['dice_macro']
         print(f'[Acc] : {acc*100:.2f} \t [IoU Macro] : {iou_macro*100:.2f} \t [Dice Macro] : {dice_macro*100:.2f}')
+
+
+    def _build_dataloaders(self) -> Tuple[DataLoader, DataLoader]:
+        train_dataset: Dataset = get_dataset(
+            name=self.args.dataset_name,
+            train=True,
+            base_path=self.args.base_path,
+            train_ratio=0.8,
+            down_sampling=False,
+            sliding_window_sec=5.0,
+        )
+        val_dataset: Dataset = get_dataset(
+            name=self.args.dataset_name,
+            train=False,
+            base_path=self.args.base_path,
+            train_ratio=0.8,
+            down_sampling=False,
+            sliding_window_sec=5.0,
+        )
+
+        train_loader = DataLoader(
+            dataset=train_dataset,
+            batch_size=self.args.batch_size,
+            shuffle=True,
+        )
+        val_loader = DataLoader(
+            dataset=val_dataset,
+            batch_size=self.args.batch_size,
+            shuffle=False,
+            drop_last=False,
+        )
+        return train_loader, val_loader
 
     def run(self):
         for epoch in range(1, self.args.epochs + 1):
