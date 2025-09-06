@@ -54,8 +54,8 @@ class Trainer(object):
         self.model: nn.Module = FCN1D(
             in_channels=2,
             out_channels=2,
-            stem_channels=64,
-            stage_channels=(64, 64, 128, 256),
+            stem_channels=32,
+            stage_channels=(32, 64, 128, 128),
             stage_blocks=(2, 2, 2, 1),
             stem_kernel=11,
             block_kernel=5,
@@ -63,7 +63,7 @@ class Trainer(object):
 
         self.optimizer = optim.AdamW(self.model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=args.epochs)
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = CrossEntropyDiceLoss()
         self.scaler = torch.cuda.amp.GradScaler()
 
         # Data
@@ -74,13 +74,17 @@ class Trainer(object):
             name=self.args.dataset_name,
             train=True,
             base_path=self.args.base_path,
-            train_ratio=0.8
+            train_ratio=0.8,
+            down_sampling=False,
+            sliding_window_sec=5.0,
         )
         val_dataset: Dataset = get_dataset(
             name=self.args.dataset_name,
             train=False,
             base_path=self.args.base_path,
-            train_ratio=0.8
+            train_ratio=0.8,
+            down_sampling=False,
+            sliding_window_sec=5.0,
         )
 
         train_loader = DataLoader(
@@ -98,7 +102,6 @@ class Trainer(object):
 
     def _make_input(self, data: Dict[str, torch.Tensor]) -> torch.Tensor:
         x = torch.stack([data['ECG_1'], data['ECG_2']], dim=1)  # (B, 2, T)
-        # x = data['ECG_1'].unsqueeze(1)
         return to_device(x, self.device)
 
     def train_one_epoch(self, epoch: int):
@@ -108,6 +111,7 @@ class Trainer(object):
 
             x = self._make_input(data)
             y = target.long().to(self.device)
+            y[y > 0] = 1
 
             with torch.cuda.amp.autocast():
                 logits = self.model(x)
@@ -127,6 +131,7 @@ class Trainer(object):
         for data, target in self.val_loader:
             x = self._make_input(data)
             y = target.long().to(self.device)
+            y[y > 0] = 1
 
             logits = self.model(x)
             preds = logits.argmax(dim=1)
