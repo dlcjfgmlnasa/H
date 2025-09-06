@@ -43,8 +43,8 @@ def get_dataset(
     base_path: str,
     train: bool = True,
     fs: int = 125,
-    second: float = 10.0,
-    sliding_window_sec: float = 10.0,
+    second: float = 5.0,
+    sliding_window_sec: float = 5.0,
     train_ratio: float = 0.8,
 ):
     name = name.lower()

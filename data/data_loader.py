@@ -27,6 +27,7 @@ class SlidingWindowDataset(Dataset):
         self.fs = fs
         self.window_sec = window_sec
         self.step_sec = step_sec
+        self.train = train
 
         self.paths = utils.list_subdirs(base_path)
         if len(self.paths) == 0:
@@ -35,6 +36,7 @@ class SlidingWindowDataset(Dataset):
         split = int(len(self.paths) * float(train_ratio))
         self.paths_train = self.paths[:split]
         self.paths_test = self.paths[split:]
+
         target_paths = self.paths_train if train else self.paths_test
 
         self.data_dict, self.mask_arr = self._load_and_window_all(target_paths)
@@ -90,9 +92,16 @@ class SlidingWindowDataset(Dataset):
         for p in paths:
             sig_1d, m_1d = self._load_one(p)
             sig_w, m_w = self._window_one(sig_1d, m_1d)
-            for k in self.signal_cols:
-                data_chunks[k].append(sig_w[k])
-            mask_chunks.append(m_w)
+
+            if self.train:
+                m_w_expend = np.sum(m_w, axis=-1).astype(np.bool_)
+                for k in self.signal_cols:
+                    data_chunks[k].append(sig_w[k][m_w_expend])
+                mask_chunks.append(m_w[m_w_expend])
+            else:
+                for k in self.signal_cols:
+                    data_chunks[k].append(sig_w[k])
+                mask_chunks.append(m_w)
 
         cat_dict = {k: np.concatenate(v, axis=0) if len(v) else np.empty((0, 0), dtype=float)
                     for k, v in data_chunks.items()}
@@ -109,6 +118,10 @@ class SlidingWindowDataset(Dataset):
 
         data = {k: torch.tensor(v, dtype=torch.float32) for k, v in data_np.items()}
         mask = torch.tensor(mask_np, dtype=torch.long)
+
+        # --- #
+        mask[mask > 0] = 1
+        # --- #
         return data, mask
 
 
@@ -122,8 +135,8 @@ class HeartbeatDataset(SlidingWindowDataset):
         base_path: str = "/data/segmentation/mit_bit",
         train: bool = True,
         fs: int = 125,
-        second: float = 10.0,
-        sliding_window_sec: float = 10.0,
+        second: float = 30.0,
+        sliding_window_sec: float = 30.0,
         train_ratio: float = 0.8,
     ):
         super().__init__(
@@ -160,17 +173,37 @@ class AHIDataset(SlidingWindowDataset):
         )
 
 
-# if __name__ == "__main__":
-#     ds = HeartbeatDataset(
-#         base_path="/data/segmentation/mit_bit",
-#         train=True,
-#         fs=125,
-#         second=10.0,
-#         sliding_window_sec=10.0,
-#         train_ratio=0.8,
-#     )
-#     dl = DataLoader(ds, batch_size=8, shuffle=True, num_workers=0)
-#     data, mask = next(iter(dl))
-#     print(data)
-#     print(mask)
+if __name__ == "__main__":
+    ds = HeartbeatDataset(
+        base_path="/data/segmentation/mit_bit",
+        train=True,
+        fs=125,
+        second=5.0,
+        sliding_window_sec=5.0,
+        train_ratio=0.8,
+    )
+    print(ds.mask_arr.shape)
+
+    ds2 = HeartbeatDataset(
+        base_path="/data/segmentation/mit_bit",
+        train=False,
+        fs=125,
+        second=5.0,
+        sliding_window_sec=5.0,
+        train_ratio=0.8,
+    )
+    print(ds2.mask_arr.shape)
+    # import matplotlib.pyplot as plt
+    # for d in ds:
+    #     print(d)
+    #     d, m = d
+    #     # # plt.title(f'{set(m.numpy())}')
+    #     plt.plot(d['ECG_1'])
+    #     plt.plot(m)
+    #     plt.show()
+    #     # exit()
+    # # dl = DataLoader(ds, batch_size=8, shuffle=True, num_workers=0)
+    # # data, mask = next(iter(dl))
+    # # print(data)
+    # # print(mask)
 
