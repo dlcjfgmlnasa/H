@@ -9,7 +9,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from sklearn.metrics import accuracy_score
 from utils import metric
 from exp.pspnet.model import PSPNet1D
 from data.utils import get_dataset
