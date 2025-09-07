@@ -192,17 +192,4 @@ if __name__ == "__main__":
         train_ratio=0.8,
     )
     print(ds2.mask_arr.shape)
-    # import matplotlib.pyplot as plt
-    # for d in ds:
-    #     print(d)
-    #     d, m = d
-    #     # # plt.title(f'{set(m.numpy())}')
-    #     plt.plot(d['ECG_1'])
-    #     plt.plot(m)
-    #     plt.show()
-    #     # exit()
-    # # dl = DataLoader(ds, batch_size=8, shuffle=True, num_workers=0)
-    # # data, mask = next(iter(dl))
-    # # print(data)
-    # # print(mask)
 

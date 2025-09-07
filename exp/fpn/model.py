@@ -9,16 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as f
 
 
-def _choose_gn_groups(c: int) -> int:
-    for g in (8, 4, 2, 1):
-        if c % g == 0:
-            return g
-    return 1
-
-
 def _same_padding_1d(kernel_size: int, dilation: int = 1) -> int:
     return dilation * (kernel_size - 1) // 2
-
 
 
 class BasicBlock1D(nn.Module):
@@ -27,30 +19,26 @@ class BasicBlock1D(nn.Module):
         padding = _same_padding_1d(k)
 
         self.conv1 = nn.Conv1d(in_ch, out_ch, kernel_size=k, stride=stride, padding=padding, bias=False)
-        self.norm1 = nn.GroupNorm(_choose_gn_groups(out_ch), out_ch)
+        self.norm1 = nn.BatchNorm1d(out_ch)
         self.act1 = nn.SiLU(inplace=True)
 
         self.conv2 = nn.Conv1d(out_ch, out_ch, kernel_size=k, stride=1, padding=padding, bias=False)
-        self.norm2 = nn.GroupNorm(_choose_gn_groups(out_ch), out_ch)
-
+        self.norm2 = nn.BatchNorm1d(out_ch)
         self.downsample: Optional[nn.Module] = None
         if stride != 1 or in_ch != out_ch:
             self.downsample = nn.Sequential(
                 nn.Conv1d(in_ch, out_ch, 1, stride=stride, bias=False),
-                nn.GroupNorm(_choose_gn_groups(out_ch), out_ch),
+                nn.BatchNorm1d(out_ch),
             )
         self.act_out = nn.SiLU(inplace=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         identity = self.downsample(x) if self.downsample is not None else x
-
         out = self.conv1(x)
         out = self.norm1(out)
         out = self.act1(out)
-
         out = self.conv2(out)
         out = self.norm2(out)
-
         out += identity
         return self.act_out(out)
 
@@ -61,16 +49,15 @@ class ConvBlock1D(nn.Module):
         pad = _same_padding_1d(kernel_size)
         self.block = nn.Sequential(
             nn.Conv1d(in_ch, out_ch, kernel_size, stride=stride, padding=pad, bias=False),
-            nn.GroupNorm(_choose_gn_groups(out_ch), out_ch),
+            nn.BatchNorm1d(out_ch),  # <-- 변경
             nn.SiLU(inplace=True),
             nn.Conv1d(out_ch, out_ch, kernel_size, stride=1, padding=pad, bias=False),
-            nn.GroupNorm(_choose_gn_groups(out_ch), out_ch),
+            nn.BatchNorm1d(out_ch),  # <-- 변경
             nn.SiLU(inplace=True),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.block(x)
-
 
 
 class Backbone1D(nn.Module):
@@ -90,7 +77,7 @@ class Backbone1D(nn.Module):
                 in_channels, stem_channels, kernel_size=stem_kernel,
                 stride=2, padding=_same_padding_1d(stem_kernel), bias=False
             ),
-            nn.GroupNorm(_choose_gn_groups(stem_channels), stem_channels),
+            nn.BatchNorm1d(stem_channels),  # <-- 변경
             nn.SiLU(inplace=True),
         )
         self.layer2 = self._make_layer(stem_channels, stage_channels[0], stage_blocks[0], stride=stage_strides[0],
@@ -115,11 +102,11 @@ class Backbone1D(nn.Module):
         return nn.Sequential(*blocks)
 
     def forward(self, x: torch.Tensor) -> ODict[str, torch.Tensor]:
-        x = self.stem(x)        # T / 2
-        c2 = self.layer2(x)     # T / 4
-        c3 = self.layer3(c2)    # T / 8
-        c4 = self.layer4(c3)    # T / 16
-        c5 = self.layer5(c4)    # T / 32
+        x = self.stem(x)
+        c2 = self.layer2(x)
+        c3 = self.layer3(c2)
+        c4 = self.layer4(c3)
+        c5 = self.layer5(c4)
         return ODict([("C2", c2), ("C3", c3), ("C4", c4), ("C5", c5)])
 
 
@@ -128,7 +115,6 @@ class FCN1D(nn.Module):
             self,
             in_channels: int,
             out_channels: int,
-
             stem_channels: int = 64,
             stage_channels: Tuple[int, int, int, int] = (128, 256, 512, 512),
             stage_blocks: Tuple[int, int, int, int] = (2, 2, 2, 2),
@@ -152,10 +138,8 @@ class FCN1D(nn.Module):
         self.upsample2x_c4 = nn.ConvTranspose1d(out_channels, out_channels, 4, stride=2, padding=1)
         self.upsample8x_final = nn.ConvTranspose1d(out_channels, out_channels, 16, stride=8, padding=4)
 
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         input_size = x.shape[-1]
-
         features = self.backbone(x)
         c3, c4, c5 = features["C3"], features["C4"], features["C5"]
 
@@ -173,9 +157,7 @@ class FCN1D(nn.Module):
         y = y + s3
 
         y = self.upsample8x_final(y)
-
         y = y[..., :input_size]
-
         return y
 
 
@@ -183,16 +165,7 @@ if __name__ == "__main__":
     torch.manual_seed(0)
     BATCH, T_LEN, IN_CH = 4, 5000, 2
 
-    T_LEN_LIGHT = 125 * 5  # 625
+    model = FCN1D(in_channels=IN_CH, out_channels=6)
 
-    model_light = FCN1D(
-        in_channels=IN_CH,
-        out_channels=6,
-        stem_channels=32,
-        stage_channels=(32, 64, 128, 256),
-        stage_blocks=(2, 2, 2, 1),
-        stem_kernel=11,
-        block_kernel=5,
-    )
-    oo = model_light(torch.randn(BATCH, IN_CH, T_LEN))
-    print(oo.shape)
+    output_train = model(torch.randn(BATCH, IN_CH, T_LEN))
+    print(f"Train mode output shape: {output_train.shape}")

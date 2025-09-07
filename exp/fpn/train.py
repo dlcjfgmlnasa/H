@@ -1,4 +1,6 @@
 # -*- coding:utf-8 -*-
+import os
+import json
 import argparse
 import warnings
 from typing import Tuple, Dict
@@ -6,11 +8,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset
-from sklearn.metrics import accuracy_score, f1_score
-import json
+from torch.utils.data import DataLoader
+from sklearn.metrics import accuracy_score
 from utils import metric
-from pspnet.model import PSPNet1D
+from exp.fpn.model import FCN1D
 from data.utils import get_dataset
 from utils.loss import CrossEntropyDiceLoss
 
@@ -18,7 +19,7 @@ warnings.filterwarnings('ignore')
 
 
 def set_seed(seed: int = 42):
-    import random, os
+    import random
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -32,16 +33,17 @@ def to_device(batch_x: torch.Tensor, device: torch.device) -> torch.Tensor:
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_name', default='heartbeat', choices=['heartbeat', 'ahi'])
-    parser.add_argument('--base_path', default='/data/segmentation/mit_bit', type=str)
-    parser.add_argument('--epochs', default=200, type=int)
+    parser.add_argument('--save_path', type=str, default=os.path.join('..', '..', 'result'))
+
+    parser.add_argument('--epochs', default=100, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--batch_size', default=1024, type=int)
-    parser.add_argument('--device', default='cuda:1', type=str)
-    parser.add_argument('--seed', default=42, type=int)
-
     parser.add_argument('--ce_dice_alpha', default=0.7, type=float)
     parser.add_argument('--weight_decay', default=1e-2, type=float)
     parser.add_argument('--grad_clip', default=1.0, type=float)
+
+    parser.add_argument('--device', default='cuda:1', type=str)
+    parser.add_argument('--seed', default=42, type=int)
     return parser.parse_args()
 
 
@@ -51,7 +53,7 @@ class Trainer(object):
         self.device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
 
         # Model
-        self.model: nn.Module = PSPNet1D(
+        self.model: nn.Module = FCN1D(
             in_channels=2,
             out_channels=2,
             stem_channels=32,
@@ -66,8 +68,8 @@ class Trainer(object):
         self.criterion = CrossEntropyDiceLoss()
         self.scaler = torch.cuda.amp.GradScaler()
 
-        # Data
-        self.train_loader, self.val_loader = self._build_dataloaders()
+        # Data Loader
+        self.train_loader, self.eval_loader = self._build_dataloaders()
 
     def _make_input(self, data: Dict[str, torch.Tensor]) -> torch.Tensor:
         x = torch.stack([data['ECG_1'], data['ECG_2']], dim=1)  # (B, 2, T)
@@ -80,7 +82,7 @@ class Trainer(object):
 
             x = self._make_input(data)
             y = target.long().to(self.device)
-            y[y > 0] = 1
+            y[y > 0] = 1        # To binary classification
 
             with torch.cuda.amp.autocast():
                 logits = self.model(x)
@@ -90,17 +92,17 @@ class Trainer(object):
             self.scaler.step(self.optimizer)
             self.scaler.update()
 
-        self.scheduler.step()
+        self.scheduler.step(epoch=epoch)
 
     @torch.inference_mode()
-    def validate(self, epoch: int) -> Tuple[float, float]:
+    def eval_one_epoch(self, epoch: int) -> Dict:
         self.model.eval()
         preds_all, reals_all = [], []
 
-        for data, target in self.val_loader:
+        for data, target in self.eval_loader:
             x = self._make_input(data)
             y = target.long().to(self.device)
-            y[y > 0] = 1
+            y[y > 0] = 1        # To binary classification
 
             logits = self.model(x)
             preds = logits.argmax(dim=1)
@@ -112,46 +114,37 @@ class Trainer(object):
         y_true = torch.cat(reals_all, dim=0).reshape(-1).numpy()
 
         result = metric.calculate_segmentation_metrics(y_pred, y_true, num_classes=2)
-        acc = accuracy_score(y_true, y_pred)
-        iou_macro, dice_macro = result['iou_macro'], result['dice_macro']
-        print(f'[Acc] : {acc*100:.2f} \t [IoU Macro] : {iou_macro*100:.2f} \t [Dice Macro] : {dice_macro*100:.2f}')
+        accuracy, iou_macro, dice_macro = result['accuracy'], result['iou_macro'], result['dice_macro']
+        print(f'[Epoch]: {epoch:03d} => '
+              f'[Accuracy] : {accuracy*100:.2f} [IoU Macro] : {iou_macro*100:.2f} [Dice Macro] : {dice_macro*100:.2f}')
+        return result
 
 
     def _build_dataloaders(self) -> Tuple[DataLoader, DataLoader]:
-        train_dataset: Dataset = get_dataset(
-            name=self.args.dataset_name,
-            train=True,
-            base_path=self.args.base_path,
-            train_ratio=0.8,
-            down_sampling=False,
-            sliding_window_sec=5.0,
-        )
-        val_dataset: Dataset = get_dataset(
-            name=self.args.dataset_name,
-            train=False,
-            base_path=self.args.base_path,
-            train_ratio=0.8,
-            down_sampling=False,
-            sliding_window_sec=5.0,
-        )
-
+        train_dataset, eval_dataset = get_dataset(name=self.args.dataset_name)
         train_loader = DataLoader(
             dataset=train_dataset,
             batch_size=self.args.batch_size,
             shuffle=True,
         )
-        val_loader = DataLoader(
-            dataset=val_dataset,
+        eval_loader = DataLoader(
+            dataset=eval_dataset,
             batch_size=self.args.batch_size,
             shuffle=False,
             drop_last=False,
         )
-        return train_loader, val_loader
+        return train_loader, eval_loader
 
     def run(self):
+        results = []
         for epoch in range(1, self.args.epochs + 1):
             self.train_one_epoch(epoch)
-            self.validate(epoch)
+            result = self.eval_one_epoch(epoch)
+            results.append(result)
+
+        file_path = os.path.join(args.save_path, args.dataset_name, 'fpn.json')
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=4)
 
 
 if __name__ == '__main__':

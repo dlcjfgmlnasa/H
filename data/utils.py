@@ -38,39 +38,41 @@ def list_subdirs(base_path: str) -> List[str]:
     return subdirs
 
 
-def get_dataset(
-    name: str,
-    base_path: str,
-    train: bool = True,
-    fs: int = 125,
-    second: float = 5.0,
-    *,
-    down_sampling: bool = False,
-    sliding_window_sec: float = 5.0,
-    train_ratio: float = 0.8,
-):
+def get_dataset(name: str):
     name = name.lower()
 
     if name == "heartbeat":
         from data.data_loader import HeartbeatDataset
-        return HeartbeatDataset(
-            base_path=base_path,
-            train=train,
-            fs=fs,
-            second=second,
-            down_sampling=down_sampling,
-            sliding_window_sec=sliding_window_sec,
-            train_ratio=train_ratio,
+        train_dataset = HeartbeatDataset(
+            base_path='/data/segmentation/mit_bit',
+            fs=125,
+            second=5.0,
+            sliding_window_sec=5.0,
+            down_sampling=False,
+            train_ratio=0.8,
+            train=True
         )
+        eval_dataset = HeartbeatDataset(
+            base_path='/data/segmentation/mit_bit',
+            fs=125,
+            second=5.0,
+            sliding_window_sec=5.0,
+            down_sampling=False,
+            train_ratio=0.8,
+            train=False
+        )
+        return train_dataset, eval_dataset
+
     elif name == "ahi":
-        from data.data_loader import AHIDataset
-        return AHIDataset(
-            base_path=base_path,
-            train=train,
-            fs=fs,
-            second=second,
-            sliding_window_sec=sliding_window_sec,
-            train_ratio=train_ratio,
-        )
+        pass
+        # from data.data_loader import AHIDataset
+        # return AHIDataset(
+        #     base_path=base_path,
+        #     train=train,
+        #     fs=fs,
+        #     second=second,
+        #     sliding_window_sec=sliding_window_sec,
+        #     train_ratio=train_ratio,
+        # )
     else:
         raise ValueError(f"Invalid dataset name provided: {name}")
