@@ -64,15 +64,24 @@ def get_dataset(name: str):
         return train_dataset, eval_dataset
 
     elif name == "ahi":
-        pass
-        # from data.data_loader import AHIDataset
-        # return AHIDataset(
-        #     base_path=base_path,
-        #     train=train,
-        #     fs=fs,
-        #     second=second,
-        #     sliding_window_sec=sliding_window_sec,
-        #     train_ratio=train_ratio,
-        # )
+        from data.data_loader import AHIDataset
+        train_dataset = AHIDataset(
+            base_path='/data/segmentation/shhs2_o',
+            fs=10,
+            second=300,
+            sliding_window_sec=300,
+            train_ratio=0.8,
+            train=True,
+            down_sampling=False
+        )
+        eval_dataset = AHIDataset(
+            base_path='/data/segmentation/shhs2_o',
+            fs=10,
+            second=300,
+            sliding_window_sec=300,
+            train_ratio=0.8,
+            train=False,
+        )
+        return train_dataset, eval_dataset
     else:
         raise ValueError(f"Invalid dataset name provided: {name}")

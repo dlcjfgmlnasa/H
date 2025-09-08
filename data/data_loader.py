@@ -158,12 +158,14 @@ class AHIDataset(SlidingWindowDataset):
         train: bool = True,
         fs: int = 125,
         second: float = 10.0,
+        down_sampling: bool = False,
         sliding_window_sec: float = 10.0,
         train_ratio: float = 0.8,
     ):
         super().__init__(
             base_path=base_path,
             signal_cols=("AIRFLOW", "THOR RES", "ABDO RES", "SaO2"),
+            down_sampling=down_sampling,
             train=train,
             train_ratio=train_ratio,
             fs=fs,
