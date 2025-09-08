@@ -32,7 +32,7 @@ def to_device(batch_x: torch.Tensor, device: torch.device) -> torch.Tensor:
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_name', default='heartbeat', choices=['heartbeat', 'ahi'])
+    parser.add_argument('--dataset_name', default='ahi', choices=['heartbeat', 'ahi'])
     parser.add_argument('--save_path', type=str, default=os.path.join('..', '..', 'result'))
 
     parser.add_argument('--epochs', default=100, type=int)
@@ -54,7 +54,7 @@ class Trainer(object):
 
         # Model
         self.model: nn.Module = FCN1D(
-            in_channels=2,
+            in_channels=4,
             out_channels=2,
             stem_channels=32,
             stage_channels=(32, 64, 128, 128),
@@ -72,7 +72,13 @@ class Trainer(object):
         self.train_loader, self.eval_loader = self._build_dataloaders()
 
     def _make_input(self, data: Dict[str, torch.Tensor]) -> torch.Tensor:
-        x = torch.stack([data['ECG_1'], data['ECG_2']], dim=1)  # (B, 2, T)
+        # x = torch.stack([data['ECG_1'], data['ECG_2']], dim=1)  # (B, 2, T)
+        # x = {
+        #     'AIRFLOW': data['AIRFLOW'].unsqueeze(dim=1).to(self.device),
+        #     'RES': torch.stack([data['THOR RES'], data['ABDO RES']], dim=1).to(self.device),
+        #     'SaO2': data['SaO2'].unsqueeze(dim=1).to(self.device),
+        # }
+        x = torch.stack([data['AIRFLOW'], data['THOR RES'], data['ABDO RES'], data["SaO2"]], dim=1)
         return to_device(x, self.device)
 
     def train_one_epoch(self, epoch: int):
