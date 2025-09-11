@@ -76,6 +76,9 @@ class Trainer(object):
         # Data Loader
         self.train_loader, self.eval_loader = self._build_dataloaders()
 
+    def _make_label(self, mask: torch.Tensor):
+        pass
+
     def _make_input(self, data: Dict[str, torch.Tensor]) -> torch.Tensor:
         # x = torch.stack([data['ECG_1'], data['ECG_2']], dim=1)  # (B, 2, T)
         x = torch.stack([data['AIRFLOW'], data['THOR RES'], data['ABDO RES']], dim=1)

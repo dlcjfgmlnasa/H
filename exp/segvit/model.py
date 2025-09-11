@@ -11,9 +11,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# -----------------------------------------------------------------------------
-# Utilities (기존과 동일)
-# -----------------------------------------------------------------------------
 def pad_to_multiple_1d(x: torch.Tensor, multiple: int) -> Tuple[torch.Tensor, int]:
     """Right-pad (B, C, T) so that T % multiple == 0."""
     t_len = x.size(-1)
@@ -60,7 +57,7 @@ class DropPath(nn.Module):
 
 
 # -----------------------------------------------------------------------------
-# ViT(1D) Components (기존과 동일)
+# ViT(1D) Components
 # -----------------------------------------------------------------------------
 class PatchEmbed1D(nn.Module):
     """Overlapping/non-overlapping patch embedding for 1D signals."""
