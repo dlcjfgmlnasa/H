@@ -262,7 +262,6 @@ class SegFormerDecodeHead1D(nn.Module):
         self.classifier = nn.Conv1d(decoder_dim, num_classes, 1)
 
     def forward(self, feats: List[torch.Tensor], out_len: int) -> torch.Tensor:
-        # feats: [S1, S2, S3, S4], 각 텐서는 (B, C_i, T_i)
         ref_len = feats[0].shape[-1]
 
         upsampled = [
