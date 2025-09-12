@@ -31,7 +31,7 @@ def to_device(batch_x: torch.Tensor, device: torch.device) -> torch.Tensor:
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_name', default='ahi', choices=['heartbeat', 'ahi'])
+    parser.add_argument('--dataset_name', default='heartbeat', choices=['heartbeat', 'ahi'])
     parser.add_argument('--save_path', type=str, default=os.path.join('..', '..', 'result'))
 
     parser.add_argument('--epochs', default=100, type=int)
@@ -71,9 +71,6 @@ class Trainer(object):
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=args.epochs)
         self.criterion = CrossEntropyDiceLoss()
         self.scaler = torch.cuda.amp.GradScaler()
-
-        # Data Loader
-        self.train_loader, self.eval_loader = self._build_dataloaders()
 
     def _make_input(self, data: Dict[str, torch.Tensor]) -> torch.Tensor:
         x = torch.stack(list(data.values()), dim=1)
@@ -115,7 +112,7 @@ class Trainer(object):
         y_pred = torch.cat(preds_all, dim=0).reshape(-1).numpy()
         y_true = torch.cat(reals_all, dim=0).reshape(-1).numpy()
 
-        result = metric.calculate_segmentation_metrics(y_pred, y_true, num_classes=3)
+        result = metric.calculate_segmentation_metrics(y_pred, y_true, num_classes=self.class_num)
         accuracy, iou_macro, dice_macro = result['accuracy'], result['iou_macro'], result['dice_macro']
         print(f'[Epoch]: {epoch:03d} => '
               f'[Accuracy] : {accuracy*100:.2f} [IoU Macro] : {iou_macro*100:.2f} [Dice Macro] : {dice_macro*100:.2f}')

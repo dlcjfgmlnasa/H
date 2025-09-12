@@ -31,12 +31,12 @@ def to_device(batch_x: torch.Tensor, device: torch.device) -> torch.Tensor:
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_name', default='ahi', choices=['heartbeat', 'ahi'])
+    parser.add_argument('--dataset_name', default='heartbeat', choices=['heartbeat', 'ahi'])
     parser.add_argument('--save_path', type=str, default=os.path.join('..', '..', 'result'))
 
     parser.add_argument('--epochs', default=100, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
-    parser.add_argument('--batch_size', default=64, type=int)
+    parser.add_argument('--batch_size', default=512, type=int)
     parser.add_argument('--ce_dice_alpha', default=0.7, type=float)
     parser.add_argument('--weight_decay', default=1e-2, type=float)
     parser.add_argument('--grad_clip', default=1.0, type=float)
@@ -55,7 +55,6 @@ class Trainer(object):
         (self.train_loader, self.eval_loader), (self.channel_num, self.class_num) = self._build_dataloaders()
 
         # Model
-        # --- Backbone configuration ---
         self.model = SegViT1D(
             in_channels=self.channel_num,
             embed_dim=256,
@@ -116,7 +115,7 @@ class Trainer(object):
         y_pred = torch.cat(preds_all, dim=0).reshape(-1).numpy()
         y_true = torch.cat(reals_all, dim=0).reshape(-1).numpy()
 
-        result = metric.calculate_segmentation_metrics(y_pred, y_true, num_classes=3)
+        result = metric.calculate_segmentation_metrics(y_pred, y_true, num_classes=self.class_num)
         accuracy, iou_macro, dice_macro = result['accuracy'], result['iou_macro'], result['dice_macro']
         print(f'[Epoch]: {epoch:03d} => '
               f'[Accuracy] : {accuracy*100:.2f} [IoU Macro] : {iou_macro*100:.2f} [Dice Macro] : {dice_macro*100:.2f}')

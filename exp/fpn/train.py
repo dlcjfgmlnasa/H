@@ -110,7 +110,7 @@ class Trainer(object):
         y_pred = torch.cat(preds_all, dim=0).reshape(-1).numpy()
         y_true = torch.cat(reals_all, dim=0).reshape(-1).numpy()
 
-        result = metric.calculate_segmentation_metrics(y_pred, y_true, num_classes=2)
+        result = metric.calculate_segmentation_metrics(y_pred, y_true, num_classes=self.class_num)
         accuracy, iou_macro, dice_macro = result['accuracy'], result['iou_macro'], result['dice_macro']
         print(f'[Epoch]: {epoch:03d} => '
               f'[Accuracy] : {accuracy*100:.2f} [IoU Macro] : {iou_macro*100:.2f} [Dice Macro] : {dice_macro*100:.2f}')
