@@ -1,4 +1,5 @@
 # -*- coding:utf-8 -*-
+import copy
 import os
 from typing import Dict, List, Sequence, Tuple
 
@@ -87,6 +88,43 @@ class SlidingWindowDataset(Dataset):
             win_mask = win_mask[:n]
         return win_signals, win_mask
 
+    @staticmethod
+    def _downsample_windows(
+        sig_w: Dict[str, np.ndarray],
+        m_w: np.ndarray,
+        *,
+        neg_ratio: float = 0.5,   # 양성 대비 음성(완전 0 윈도우) 유지 비율
+    ) -> Tuple[Dict[str, np.ndarray], np.ndarray, np.ndarray]:
+        n = m_w.shape[0]
+        flat = m_w.reshape(n, -1).astype(bool)
+
+        pos_idx = flat.any(axis=1)
+        neg_idx = ~pos_idx
+
+        num_pos = int(pos_idx.sum())
+        keep_idx = pos_idx.copy()
+
+        if num_pos > 0:
+            max_negs = int(neg_ratio * num_pos)
+            neg_candidates = np.flatnonzero(neg_idx)
+            if len(neg_candidates) > 0 and max_negs > 0:
+                keep_negs = np.random.choice(
+                    neg_candidates,
+                    size=min(max_negs, len(neg_candidates)),
+                    replace=False,
+                )
+                keep_idx[keep_negs] = True
+        else:
+            neg_candidates = np.flatnonzero(neg_idx)
+            keep_count = max(1, len(neg_candidates) // 20)  # 5% 정도
+            if keep_count > 0:
+                keep_negs = np.random.choice(neg_candidates, size=keep_count, replace=False)
+                keep_idx[keep_negs] = True
+
+        filtered_sig_w = {k: sig_w[k][keep_idx] for k in sig_w}
+        filtered_m_w = m_w[keep_idx]
+        return filtered_sig_w, filtered_m_w, keep_idx
+
     def _load_and_window_all(self, paths: Sequence[str]) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
         data_chunks: Dict[str, List[np.ndarray]] = {k: [] for k in self.signal_cols}
         mask_chunks: List[np.ndarray] = []
@@ -149,6 +187,15 @@ class HeartbeatDataset(SlidingWindowDataset):
             step_sec=sliding_window_sec,
         )
 
+    def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+        data_np = {k: self.data_dict[k][idx] for k in self.signal_cols}
+        mask_np = self.mask_arr[idx]
+        mask_np[mask_np > 0] = 1        # [Normal Beat, Anomaly Beat]
+
+        data = {k: torch.tensor(v, dtype=torch.float32) for k, v in data_np.items()}
+        mask = torch.tensor(mask_np, dtype=torch.long)
+        return data, mask
+
 
 class AHIDataset(SlidingWindowDataset):
     """Sleep Heart Health Study"""
@@ -164,7 +211,7 @@ class AHIDataset(SlidingWindowDataset):
     ):
         super().__init__(
             base_path=base_path,
-            signal_cols=("AIRFLOW", "THOR RES", "ABDO RES", "SaO2"),
+            signal_cols=("AIRFLOW", "THOR RES", "ABDO RES"),
             down_sampling=down_sampling,
             train=train,
             train_ratio=train_ratio,
@@ -172,6 +219,21 @@ class AHIDataset(SlidingWindowDataset):
             window_sec=second,
             step_sec=sliding_window_sec,
         )
+        self.channel_num = 3
+        self.class_num = 3
+
+    def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+        data_np = {k: self.data_dict[k][idx] for k in self.signal_cols}
+        mask_np = self.mask_arr[idx]
+        mask_np[(1 <= mask_np) & (mask_np <= 3)] = 1
+        mask_np[mask_np == 4] = 2
+        mask_np[mask_np == 5] = 0
+        mask_np[mask_np == 6] = 0
+        mask_np[mask_np == 7] = 0        # [Normal, Apnea, Hypopnea]
+
+        data = {k: torch.tensor(v, dtype=torch.float32) for k, v in data_np.items()}
+        mask = torch.tensor(mask_np, dtype=torch.long)
+        return data, mask
 
 
 if __name__ == "__main__":

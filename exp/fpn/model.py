@@ -49,10 +49,10 @@ class ConvBlock1D(nn.Module):
         pad = _same_padding_1d(kernel_size)
         self.block = nn.Sequential(
             nn.Conv1d(in_ch, out_ch, kernel_size, stride=stride, padding=pad, bias=False),
-            nn.BatchNorm1d(out_ch),  # <-- 변경
+            nn.BatchNorm1d(out_ch),
             nn.SiLU(inplace=True),
             nn.Conv1d(out_ch, out_ch, kernel_size, stride=1, padding=pad, bias=False),
-            nn.BatchNorm1d(out_ch),  # <-- 변경
+            nn.BatchNorm1d(out_ch),
             nn.SiLU(inplace=True),
         )
 
@@ -77,7 +77,7 @@ class Backbone1D(nn.Module):
                 in_channels, stem_channels, kernel_size=stem_kernel,
                 stride=2, padding=_same_padding_1d(stem_kernel), bias=False
             ),
-            nn.BatchNorm1d(stem_channels),  # <-- 변경
+            nn.BatchNorm1d(stem_channels),
             nn.SiLU(inplace=True),
         )
         self.layer2 = self._make_layer(stem_channels, stage_channels[0], stage_blocks[0], stride=stage_strides[0],

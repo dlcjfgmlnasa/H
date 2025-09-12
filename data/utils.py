@@ -43,6 +43,9 @@ def get_dataset(name: str):
 
     if name == "heartbeat":
         from data.data_loader import HeartbeatDataset
+        channel_num = 2     # [ECG1, ECG2]
+        class_num = 2       # [0: normal heartbeat, 1: abnormal heartbeat]
+
         train_dataset = HeartbeatDataset(
             base_path='/data/segmentation/mit_bit',
             fs=125,
@@ -61,10 +64,13 @@ def get_dataset(name: str):
             train_ratio=0.8,
             train=False
         )
-        return train_dataset, eval_dataset
+        return (train_dataset, eval_dataset), (channel_num, class_num)
 
     elif name == "ahi":
         from data.data_loader import AHIDataset
+        channel_num = 3     # [AIRFLOW, THOR RES, ABDO RES]
+        class_num = 3       # [0: normal, 1: apnea, 2: hypopnea]
+
         train_dataset = AHIDataset(
             base_path='/data/segmentation/shhs2_o',
             fs=10,
@@ -82,6 +88,6 @@ def get_dataset(name: str):
             train_ratio=0.8,
             train=False,
         )
-        return train_dataset, eval_dataset
+        return (train_dataset, eval_dataset), (channel_num, class_num)
     else:
         raise ValueError(f"Invalid dataset name provided: {name}")

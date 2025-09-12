@@ -31,7 +31,7 @@ def to_device(batch_x: torch.Tensor, device: torch.device) -> torch.Tensor:
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_name', default='ahi', choices=['heartbeat', 'ahi'])
+    parser.add_argument('--dataset_name', default='heartbeat', choices=['heartbeat', 'ahi'])
     parser.add_argument('--save_path', type=str, default=os.path.join('..', '..', 'result'))
 
     parser.add_argument('--epochs', default=100, type=int)
@@ -51,10 +51,13 @@ class Trainer(object):
         self.args = args
         self.device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
 
+        # Data Loader
+        (self.train_loader, self.eval_loader), (self.channel_num, self.class_num) = self._build_dataloaders()
+
         # Model
         self.model: nn.Module = PSPNet1D(
-            in_channels=4,
-            out_channels=2,
+            in_channels=self.channel_num,
+            out_channels=self.class_num,
             stem_channels=32,
             stage_channels=(32, 64, 128, 128),
             stage_blocks=(2, 2, 2, 1),
@@ -71,8 +74,7 @@ class Trainer(object):
         self.train_loader, self.eval_loader = self._build_dataloaders()
 
     def _make_input(self, data: Dict[str, torch.Tensor]) -> torch.Tensor:
-        # x = torch.stack([data['ECG_1'], data['ECG_2']], dim=1)  # (B, 2, T)
-        x = torch.stack([data['AIRFLOW'], data['THOR RES'], data['ABDO RES'], data["SaO2"]], dim=1)
+        x = torch.stack(list(data.values()), dim=1)
         return to_device(x, self.device)
 
     def train_one_epoch(self, epoch: int):
@@ -82,7 +84,6 @@ class Trainer(object):
 
             x = self._make_input(data)
             y = target.long().to(self.device)
-            y[y > 0] = 1        # To binary classification
 
             with torch.cuda.amp.autocast():
                 logits = self.model(x)
@@ -119,8 +120,8 @@ class Trainer(object):
               f'[Accuracy] : {accuracy*100:.2f} [IoU Macro] : {iou_macro*100:.2f} [Dice Macro] : {dice_macro*100:.2f}')
         return result
 
-    def _build_dataloaders(self) -> Tuple[DataLoader, DataLoader]:
-        train_dataset, eval_dataset = get_dataset(name=self.args.dataset_name)
+    def _build_dataloaders(self) -> Tuple[Tuple[DataLoader, DataLoader], Tuple[int, int]]:
+        (train_dataset, eval_dataset), (channel_num, class_num) = get_dataset(name=self.args.dataset_name)
         train_loader = DataLoader(
             dataset=train_dataset,
             batch_size=self.args.batch_size,
@@ -132,7 +133,7 @@ class Trainer(object):
             shuffle=False,
             drop_last=False,
         )
-        return train_loader, eval_loader
+        return (train_loader, eval_loader), (channel_num, class_num)
 
     def run(self):
         results = []

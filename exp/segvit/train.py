@@ -51,10 +51,13 @@ class Trainer(object):
         self.args = args
         self.device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
 
+        # Data Loader
+        (self.train_loader, self.eval_loader), (self.channel_num, self.class_num) = self._build_dataloaders()
+
         # Model
         # --- Backbone configuration ---
         self.model = SegViT1D(
-            in_channels=3,
+            in_channels=self.channel_num,
             embed_dim=256,
             depth=8,
             num_heads=8,
@@ -65,7 +68,7 @@ class Trainer(object):
             patch_size=8,
             use_overlap=True,
             decoder_dim=128,
-            num_classes=3,
+            num_classes=self.class_num,
         ).to(self.device)
 
         self.optimizer = optim.AdamW(self.model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -73,20 +76,9 @@ class Trainer(object):
         self.criterion = CrossEntropyDiceLoss()
         self.scaler = torch.cuda.amp.GradScaler()
 
-        # Data Loader
-        self.train_loader, self.eval_loader = self._build_dataloaders()
-
-    def _make_label(self, mask: torch.Tensor):
-        pass
-
     def _make_input(self, data: Dict[str, torch.Tensor]) -> torch.Tensor:
-        # x = torch.stack([data['ECG_1'], data['ECG_2']], dim=1)  # (B, 2, T)
-        x = torch.stack([data['AIRFLOW'], data['THOR RES'], data['ABDO RES']], dim=1)
-        # x = {
-        #     'ecg': torch.stack([data['ECG_1'], data['ECG_2']], dim=1).to(self.device),
-        # }
+        x = torch.stack(list(data.values()), dim=1)
         return to_device(x, self.device)
-        # return x
 
     def train_one_epoch(self, epoch: int):
         self.model.train()
@@ -95,7 +87,6 @@ class Trainer(object):
 
             x = self._make_input(data)
             y = target.long().to(self.device)
-            y[y > 0] = 1        # To binary classification
 
             with torch.cuda.amp.autocast():
                 logits = self.model(x)
@@ -115,7 +106,6 @@ class Trainer(object):
         for data, target in self.eval_loader:
             x = self._make_input(data)
             y = target.long().to(self.device)
-            y[y > 0] = 1        # To binary classification
 
             logits = self.model(x)
             preds = logits.argmax(dim=1)
@@ -132,8 +122,8 @@ class Trainer(object):
               f'[Accuracy] : {accuracy*100:.2f} [IoU Macro] : {iou_macro*100:.2f} [Dice Macro] : {dice_macro*100:.2f}')
         return result
 
-    def _build_dataloaders(self) -> Tuple[DataLoader, DataLoader]:
-        train_dataset, eval_dataset = get_dataset(name=self.args.dataset_name)
+    def _build_dataloaders(self) -> Tuple[Tuple[DataLoader, DataLoader], Tuple[int, int]]:
+        (train_dataset, eval_dataset), (channel_num, class_num) = get_dataset(name=self.args.dataset_name)
         train_loader = DataLoader(
             dataset=train_dataset,
             batch_size=self.args.batch_size,
@@ -145,7 +135,7 @@ class Trainer(object):
             shuffle=False,
             drop_last=False,
         )
-        return train_loader, eval_loader
+        return (train_loader, eval_loader), (channel_num, class_num)
 
     def run(self):
         results = []
