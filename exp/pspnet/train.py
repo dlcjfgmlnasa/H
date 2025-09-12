@@ -70,9 +70,6 @@ class Trainer(object):
         self.criterion = CrossEntropyDiceLoss()
         self.scaler = torch.cuda.amp.GradScaler()
 
-        # Data Loader
-        self.train_loader, self.eval_loader = self._build_dataloaders()
-
     def _make_input(self, data: Dict[str, torch.Tensor]) -> torch.Tensor:
         x = torch.stack(list(data.values()), dim=1)
         return to_device(x, self.device)
@@ -103,7 +100,6 @@ class Trainer(object):
         for data, target in self.eval_loader:
             x = self._make_input(data)
             y = target.long().to(self.device)
-            y[y > 0] = 1        # To binary classification
 
             logits = self.model(x)
             preds = logits.argmax(dim=1)
