@@ -55,17 +55,13 @@ class Trainer(object):
         self.model: nn.Module = SegFormer1D(
             in_channels=3,
             num_classes=3,
-            backbone_cfg=dict(
-                embed_dims=(64, 64, 128, 128),
-                depths=(2, 2, 2, 2),
-                num_heads=(1, 2, 4, 8),
-                sr_ratios=(8, 4, 2, 1),
-                mlp_ratio=4.0,
-                drop_path_rate=0.1,
-            ),
-            decoder_cfg=dict(
-                decoder_dim=256,
-            ),
+            embed_dims=(64, 64, 128, 128),
+            depths=(2, 2, 2, 2),
+            num_heads=(1, 2, 4, 8),
+            sr_ratios=(8, 4, 2, 1),
+            mlp_ratio=4.0,
+            drop_path_rate=0.1,
+            decoder_dim=256,
         ).to(self.device)
 
         self.optimizer = optim.AdamW(self.model.parameters(), lr=args.lr, weight_decay=args.weight_decay)

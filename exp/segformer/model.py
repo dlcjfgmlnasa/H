@@ -224,7 +224,6 @@ class MiTBackbone1D(nn.Module):
 
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         features: List[torch.Tensor] = []
-        # x는 (B, C, T) 형태로 시작
         for stage in self.stages:
             x = stage["patch_embed"](x)
 
@@ -259,7 +258,7 @@ class SegFormerDecodeHead1D(nn.Module):
             nn.ReLU(inplace=True),
             nn.Dropout(p=dropout_p),
         )
-        # 3. 최종 클래스 예측
+
         self.classifier = nn.Conv1d(decoder_dim, num_classes, 1)
 
     def forward(self, feats: List[torch.Tensor], out_len: int) -> torch.Tensor:
@@ -285,39 +284,42 @@ class SegFormerDecodeHead1D(nn.Module):
 # Final SegFormer-1D Model
 # -----------------------------------------------------------------------------
 class SegFormer1D(nn.Module):
-    """1D 시계열 분할을 위한 SegFormer 모델."""
-
     def __init__(
             self,
             in_channels: int,
             num_classes: int,
-            backbone_cfg: dict | None = None,
-            decoder_cfg: dict | None = None,
+            embed_dims=(64, 64, 128, 128),
+            depths=(2, 2, 2, 2),
+            num_heads=(1, 2, 4, 8),
+            sr_ratios=(8, 4, 2, 1),
+            mlp_ratio=4.0,
+            drop_path_rate=0.1,
+            decoder_dim=256,
     ) -> None:
         super().__init__()
-        backbone_cfg = backbone_cfg or {}
-        decoder_cfg = decoder_cfg or {}
 
-        self.backbone = MiTBackbone1D(in_channels=in_channels, **backbone_cfg)
-
-        # Backbone의 출력 채널을 decoder의 입력으로 사용
-        in_dims = backbone_cfg.get("embed_dims", (64, 128, 256, 512))
+        self.backbone = MiTBackbone1D(in_channels=in_channels,
+                                      embed_dims=embed_dims,
+                                      depths=depths,
+                                      num_heads=num_heads,
+                                      sr_ratios=sr_ratios,
+                                      mlp_ratio=mlp_ratio,
+                                      drop_rate=drop_path_rate)
+        in_dims = embed_dims
 
         self.decode_head = SegFormerDecodeHead1D(
-            in_dims=in_dims, num_classes=num_classes, **decoder_cfg
+            in_dims=in_dims, num_classes=num_classes, decoder_dim=decoder_dim
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (B, C, T)
         t_orig = x.shape[-1]
 
-        # MiT 인코더는 시퀀스 길이가 32의 배수일 때 가장 잘 동작
         x, pad = pad_to_multiple_1d(x, multiple=32)
 
         features = self.backbone(x)
         logits = self.decode_head(features, out_len=x.shape[-1])
 
-        # 원래 길이로 복원
         logits = right_unpad_1d(logits, pad)
         assert logits.shape[-1] == t_orig
 
@@ -333,19 +335,15 @@ if __name__ == "__main__":
     num_classes = 5
 
     model = SegFormer1D(
-        in_channels=in_ch,
+        in_channels=1,
         num_classes=num_classes,
-        backbone_cfg=dict(
-            embed_dims=(32, 64, 64, 128),  # B0 config
-            depths=(2, 2, 2, 2),
-            num_heads=(1, 2, 4, 8),
-            sr_ratios=(8, 4, 2, 1),
-            mlp_ratio=4.0,
-            drop_path_rate=0.1,
-        ),
-        decoder_cfg=dict(
-            decoder_dim=256,
-        ),
+        embed_dims=(64, 64, 128, 128),
+        depths=(2, 2, 2, 2),
+        num_heads=(1, 2, 4, 8),
+        sr_ratios=(8, 4, 2, 1),
+        mlp_ratio=4.0,
+        drop_path_rate=0.1,
+        decoder_dim=256,
     )
 
     x_ = torch.randn(bsz, in_ch, t_len)
@@ -353,7 +351,3 @@ if __name__ == "__main__":
 
     print("Input shape:", x_.shape)
     print("Output logits shape:", y.shape)  # (B, num_classes, T)
-
-    # 모델 파라미터 수 확인
-    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Number of parameters: {num_params / 1e6:.2f} M")
