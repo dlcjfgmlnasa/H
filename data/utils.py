@@ -78,13 +78,37 @@ def get_dataset(name: str):
             sliding_window_sec=300,
             train_ratio=0.8,
             train=True,
-            down_sampling=False
+            down_sampling=True
         )
         eval_dataset = AHIDataset(
             base_path='/data/segmentation/shhs2_o',
             fs=10,
             second=300,
             sliding_window_sec=300,
+            train_ratio=0.8,
+            train=False,
+        )
+        return (train_dataset, eval_dataset), (channel_num, class_num)
+
+    elif name == "gesture":
+        from data.data_loader import NinaproDataset
+        channel_num = 8     # [EMG_1, EMG_2, EMG_3, ... ]
+        class_num = 2       # [0: normal, 1: not normal]
+
+        train_dataset = NinaproDataset(
+            base_path='/data/segmentation/ninapro_o',
+            fs=2000,
+            second=1,
+            sliding_window_sec=1,
+            train_ratio=0.8,
+            train=True,
+            down_sampling=True
+        )
+        eval_dataset = NinaproDataset(
+            base_path='/data/segmentation/ninapro_o',
+            fs=2000,
+            second=1,
+            sliding_window_sec=1,
             train_ratio=0.8,
             train=False,
         )

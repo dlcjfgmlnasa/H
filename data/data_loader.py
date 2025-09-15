@@ -236,24 +236,58 @@ class AHIDataset(SlidingWindowDataset):
         return data, mask
 
 
+class NinaproDataset(SlidingWindowDataset):
+    # https://ninapro.hevs.ch/instructions/DB2.html
+    def __init__(
+        self,
+        base_path: str = "/data/segmentation/ninapro_o",
+        train: bool = True,
+        fs: int = 2000,
+        second: float = 1,
+        down_sampling: bool = False,
+        sliding_window_sec: float = 1,
+        train_ratio: float = 0.8,
+    ):
+        super().__init__(
+            base_path=base_path,
+            signal_cols=("emg_1", "emg_2", "emg_3", "emg_4",
+                         "emg_5", "emg_6", "emg_7", "emg_8"),
+            down_sampling=down_sampling,
+            train=train,
+            train_ratio=train_ratio,
+            fs=fs,
+            window_sec=second,
+            step_sec=sliding_window_sec,
+        )
+        self.channel_num = 3
+        self.class_num = 2
+
+    def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+        data_np = {k: self.data_dict[k][idx] for k in self.signal_cols}
+        mask_np = self.mask_arr[idx]
+        mask_np[0 != mask_np] = 1
+        # mask_np[mask_np == 4] = 2
+        # mask_np[mask_np == 5] = 0
+        # mask_np[mask_np == 6] = 0
+        # mask_np[mask_np == 7] = 0
+
+        data = {k: torch.tensor(v, dtype=torch.float32) for k, v in data_np.items()}
+        mask = torch.tensor(mask_np, dtype=torch.long)
+        return data, mask
+
+
 if __name__ == "__main__":
-    ds = HeartbeatDataset(
-        base_path="/data/segmentation/mit_bit",
-        train=True,
-        fs=125,
-        second=5.0,
-        sliding_window_sec=5.0,
-        train_ratio=0.8,
-    )
-    print(ds.mask_arr.shape)
-
-    ds2 = HeartbeatDataset(
-        base_path="/data/segmentation/mit_bit",
-        train=False,
-        fs=125,
-        second=5.0,
-        sliding_window_sec=5.0,
-        train_ratio=0.8,
-    )
-    print(ds2.mask_arr.shape)
-
+    ds = NinaproDataset()
+    for d in ds:
+        print(d)
+    #
+    # ds2 = HeartbeatDataset(
+    #     base_path="/data/segmentation/mit_bit",
+    #     train=False,
+    #     fs=125,
+    #     second=5.0,
+    #     sliding_window_sec=5.0,
+    #     train_ratio=0.8,
+    # )
+    # print(ds2.mask_arr.shape)
+    #
