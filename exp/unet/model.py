@@ -6,17 +6,14 @@ from typing import List, Optional, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F  # F를 import 합니다.
+import torch.nn.functional as F
 
 
 def _same_padding_1d(kernel_size: int, dilation: int = 1) -> int:
-    """Calculates padding for 'same' convolution in 1D."""
     return dilation * (kernel_size - 1) // 2
 
 
 class BasicBlock1D(nn.Module):
-    """A basic residual block with two 1D convolutions."""
-
     def __init__(self, in_ch: int, out_ch: int, stride: int = 1, k: int = 7) -> None:
         super().__init__()
         padding = _same_padding_1d(k)
@@ -47,8 +44,6 @@ class BasicBlock1D(nn.Module):
 
 
 class ConvBlock1D(nn.Module):
-    """A simple block of two 1D convolutions, batch norm, and SiLU activation."""
-
     def __init__(self, in_ch: int, out_ch: int, stride: int = 1, kernel_size: int = 9) -> None:
         super().__init__()
         pad = _same_padding_1d(kernel_size)
@@ -66,8 +61,6 @@ class ConvBlock1D(nn.Module):
 
 
 class Backbone1D(nn.Module):
-    """The ResNet-like encoder part of the network."""
-
     def __init__(
             self,
             in_channels: int,
@@ -118,30 +111,17 @@ class Backbone1D(nn.Module):
 
 
 class UpBlock1D(nn.Module):
-    """
-    An up-sampling block that uses interpolation, concatenation with a skip
-    connection, and a convolutional block.
-    """
     def __init__(self, in_ch: int, skip_ch: int, out_ch: int, kernel_size: int = 7) -> None:
         super().__init__()
-        # The convolutional block will take the concatenated channels as input
         self.conv_block = ConvBlock1D(in_ch + skip_ch, out_ch, kernel_size=kernel_size)
 
     def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
-        # Upsample x to match the spatial dimension of the skip connection
         x = F.interpolate(x, size=skip.shape[-1], mode='linear', align_corners=False)
-        # Concatenate along the channel dimension
         x = torch.cat([x, skip], dim=1)
-        # Pass through the convolutional block
         return self.conv_block(x)
 
 
 class UNet1D(nn.Module):
-    """
-    A U-Net architecture for 1D sequence-to-sequence tasks that uses
-    interpolation for up-sampling in the decoder.
-    """
-
     def __init__(
             self,
             in_channels: int,
@@ -163,59 +143,26 @@ class UNet1D(nn.Module):
         )
 
         # -- Decoder --
-        # Replaced ConvTranspose1d and separate ConvBlock1D with a single UpBlock1D
         self.dec4 = UpBlock1D(stage_channels[3], stage_channels[2], stage_channels[2], kernel_size=block_kernel)
         self.dec3 = UpBlock1D(stage_channels[2], stage_channels[1], stage_channels[1], kernel_size=block_kernel)
         self.dec2 = UpBlock1D(stage_channels[1], stage_channels[0], stage_channels[0], kernel_size=block_kernel)
         self.dec1 = UpBlock1D(stage_channels[0], stem_channels, stem_channels, kernel_size=block_kernel)
 
-        # Final up-sampling and convolution to restore original resolution
-        # This part doesn't have a skip connection from the input
         self.dec0_conv = ConvBlock1D(stem_channels, stem_channels // 2, kernel_size=block_kernel)
         self.final_conv = nn.Conv1d(stem_channels // 2, out_channels, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         input_size = x.shape[-1]
 
-        # -- Encoder Path --
         features = self.backbone(x)
         c1, c2, c3, c4, c5 = features["C1"], features["C2"], features["C3"], features["C4"], features["C5"]
 
-        # -- Decoder Path with Skip Connections --
-        # The logic is now much cleaner, encapsulated in UpBlock1D
+
         d4 = self.dec4(c5, c4)
         d3 = self.dec3(d4, c3)
         d2 = self.dec2(d3, c2)
         d1 = self.dec1(d2, c1)
-
-        # Stage 0 (to restore original resolution)
         u0 = F.interpolate(d1, size=input_size, mode='linear', align_corners=False)
         d0 = self.dec0_conv(u0)
-
-        # Final output layer
         out = self.final_conv(d0)
         return out
-
-
-if __name__ == "__main__":
-    torch.manual_seed(0)
-    BATCH, T_LEN, IN_CH = 4, 125 * 5, 2
-
-    # Instantiate the new U-Net model
-    model = UNet1D(in_channels=IN_CH, out_channels=6)
-
-    # Check the number of parameters
-    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model: {model.__class__.__name__}")
-    print(f"Number of parameters: {num_params:,}")
-
-    # Test with a random tensor
-    input_tensor = torch.randn(BATCH, IN_CH, T_LEN)
-    output_train = model(input_tensor)
-
-    print(f"Input shape: {input_tensor.shape}")
-    print(f"Train mode output shape: {output_train.shape}")
-
-    # Verify that the output length matches the input length
-    assert input_tensor.shape[-1] == output_train.shape[-1]
-    print("✅ Output length matches input length.")
