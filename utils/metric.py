@@ -1,5 +1,7 @@
+# -*- coding:utf-8 -*-
 import numpy as np
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
+
 
 def calculate_segmentation_metrics(
     preds: np.ndarray,
@@ -12,7 +14,6 @@ def calculate_segmentation_metrics(
     preds = np.asarray(preds)
     targets = np.asarray(targets)
 
-    # 2. 혼동 행렬(Confusion Matrix) 계산
     mask = (targets != ignore_index)
     preds_masked = preds[mask]
     targets_masked = targets[mask]
@@ -23,8 +24,10 @@ def calculate_segmentation_metrics(
     ).reshape(num_classes, num_classes).astype(np.float32)
 
     tp = np.diag(conf_matrix)
-    fp = conf_matrix.sum(axis=1) - tp  # torch.sum(dim=1) -> np.sum(axis=1)
-    fn = conf_matrix.sum(axis=0) - tp  # torch.sum(dim=0) -> np.sum(axis=0)
+    fp = conf_matrix.sum(axis=1) - tp
+    fn = conf_matrix.sum(axis=0) - tp
+
+    accuracy = tp.sum() / (conf_matrix.sum() + epsilon)
 
     per_class_iou = tp / (tp + fp + fn + epsilon)
     per_class_dice = 2 * tp / (2 * tp + fp + fn + epsilon)
@@ -40,8 +43,8 @@ def calculate_segmentation_metrics(
     weighted_iou = (per_class_iou * support / (support.sum() + epsilon)).sum()
     weighted_dice = (per_class_dice * support / (support.sum() + epsilon)).sum()
 
-    # 5. 결과 딕셔너리 반환
     results = {
+        "accuracy": accuracy.item(),  # <-- 추가된 부분
         "iou_micro": micro_iou.item(),
         "iou_macro": macro_iou.item(),
         "iou_weighted": weighted_iou.item(),
