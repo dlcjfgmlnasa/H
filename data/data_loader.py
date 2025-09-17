@@ -250,8 +250,10 @@ class NinaproDataset(SlidingWindowDataset):
     ):
         super().__init__(
             base_path=base_path,
+            # signal_cols=("emg_1", 'emg_2'),
             signal_cols=("emg_1", "emg_2", "emg_3", "emg_4",
-                         "emg_5", "emg_6", "emg_7", "emg_8"),
+                         "emg_5", "emg_6", "emg_7", "emg_8",
+                         "emg_9", "emg_10", "emg_11", "emg_12"),
             down_sampling=down_sampling,
             train=train,
             train_ratio=train_ratio,
@@ -263,13 +265,46 @@ class NinaproDataset(SlidingWindowDataset):
         self.class_num = 2
 
     def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+        """
+        New Class 0: 휴식 (Rest)
+         - Original: 0
+
+        New Class 1: 손 펴기 (Hand Open)
+         - Original: 6 (Hand open)
+
+        New Class 2: 손 쥐기 (Hand Close / Fist)
+         - Original: 5 (Hand close), 22, 23, 24, 25 (다양한 직경의 파워 쥐기)
+
+        New Class 3: 손가락 집기 (Pinch)
+         - Original: 7, 8, 9, 10 (각 손가락과 엄지 집기), 18, 19, 20, 21, 32 (기능적인 집기 동작)
+
+        New Class 4: 손목 움직임 (Wrist Movement)
+         - Original: 12, 13, 14 (굽힘, 회전 등)
+        """
         data_np = {k: self.data_dict[k][idx] for k in self.signal_cols}
         mask_np = self.mask_arr[idx]
-        mask_np[0 != mask_np] = 1
+
+        hand_open_labels = [6]
+        hand_close_labels = [5, 22, 23, 24, 25]
+        pinch_labels = [7, 8, 9, 10, 18, 19, 20, 21, 32]
+        wrist_labels = [12, 13, 14]
+
+        conditions = [
+            np.isin(mask_np, hand_open_labels),
+            np.isin(mask_np, hand_close_labels),
+            np.isin(mask_np, pinch_labels),
+            np.isin(mask_np, wrist_labels),
+        ]
+
+        choices = [1, 2, 3, 4]
+        y_remapped = np.select(conditions, choices, default=-1)
+        y_remapped[mask_np == 0] = 0  # 휴식 클래스(0)는 확실하게 0으로 지정
+
         # mask_np[mask_np == 4] = 2
         # mask_np[mask_np == 5] = 0
         # mask_np[mask_np == 6] = 0
         # mask_np[mask_np == 7] = 0
+        mask_np = y_remapped
 
         data = {k: torch.tensor(v, dtype=torch.float32) for k, v in data_np.items()}
         mask = torch.tensor(mask_np, dtype=torch.long)

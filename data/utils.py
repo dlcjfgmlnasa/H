@@ -92,23 +92,23 @@ def get_dataset(name: str):
 
     elif name == "gesture":
         from data.data_loader import NinaproDataset
-        channel_num = 8     # [EMG_1, EMG_2, EMG_3, ... ]
-        class_num = 2       # [0: normal, 1: not normal]
+        channel_num = 12          # [EMG_1, EMG_2, EMG_3, ... ]
+        class_num = 5             # [0: normal, 1: not normal]
 
         train_dataset = NinaproDataset(
-            base_path='/data/segmentation/ninapro_o',
-            fs=2000,
-            second=1,
-            sliding_window_sec=1,
+            base_path='/data/segmentation/ninapro_f2',
+            fs=1000,
+            second=10,
+            sliding_window_sec=10,
             train_ratio=0.8,
             train=True,
-            down_sampling=True
+            down_sampling=False
         )
         eval_dataset = NinaproDataset(
-            base_path='/data/segmentation/ninapro_o',
-            fs=2000,
-            second=1,
-            sliding_window_sec=1,
+            base_path='/data/segmentation/ninapro_f2',
+            fs=1000,
+            second=10,
+            sliding_window_sec=10,
             train_ratio=0.8,
             train=False,
         )
