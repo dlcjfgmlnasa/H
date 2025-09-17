@@ -61,6 +61,10 @@ class Trainer(object):
             stem_channels=32,
             stage_channels=(32, 64, 128, 128),
             decoder_channels=(128, 64, 32),
+            stem_kernel=50,  # 75ms
+            block_kernel=25,  # 25ms
+            decoder_kernel=15,  # 15ms
+            bottleneck_kernel=5  # 3ms
         ).to(self.device)
 
         self.optimizer = optim.AdamW(self.model.parameters(), lr=args.lr, weight_decay=args.weight_decay)

@@ -146,22 +146,19 @@ class SEBlock1D(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, C, L)
-        # attention: (B, C, 1)
         attention_weights = self.se(x)
         return x * attention_weights
 
 
 class DecoderBlock1D(nn.Module):
-    def __init__(self, in_ch: int, skip_ch: int, out_ch: int, use_attention: bool = True):
+    def __init__(self, in_ch: int, skip_ch: int, out_ch: int, use_attention: bool = True, kernel_size: int = 5):
         super().__init__()
         combined_ch = in_ch + skip_ch
-        self.convs = ConvBlock1D(combined_ch, out_ch, kernel_size=5)
+        self.convs = ConvBlock1D(combined_ch, out_ch, kernel_size=kernel_size)
         self.attention = SEBlock1D(out_ch) if use_attention else nn.Identity()
 
     def forward(self, x: torch.Tensor, skip_feature: torch.Tensor) -> torch.Tensor:
         x = F.interpolate(x, size=skip_feature.size(-1), mode='linear', align_corners=False)
-
         x = torch.cat([x, skip_feature], dim=1)
         x = self.convs(x)
         x = self.attention(x)
@@ -179,6 +176,10 @@ class MANet1D(nn.Module):
             stage_strides: Tuple[int, int, int, int] = (2, 2, 2, 2),
             decoder_channels: Tuple[int, int, int] = (256, 128, 64),
             pool_sizes: Tuple[int, ...] = (1, 2, 3, 6),
+            stem_kernel: int = 15,
+            block_kernel: int = 7,
+            decoder_kernel: int = 5,
+            bottleneck_kernel: int = 3,
     ):
         super().__init__()
         # --- Encoder ---
@@ -188,60 +189,59 @@ class MANet1D(nn.Module):
             stage_channels=stage_channels,
             stage_blocks=stage_blocks,
             stage_strides=stage_strides,
+            stem_kernel=stem_kernel,
+            block_kernel=block_kernel,
         )
 
         # --- Bottleneck ---
         ppm_in_channels = self.backbone.out_ch["C5"]
         self.ppm = PyramidPooling1D(in_channels=ppm_in_channels, pool_sizes=pool_sizes)
-        self.bottleneck_conv = ConvBlock1D(self.ppm.out_channels, ppm_in_channels, kernel_size=3)
+        self.bottleneck_conv = ConvBlock1D(self.ppm.out_channels, ppm_in_channels, kernel_size=bottleneck_kernel)
         self.bottleneck_attention = SEBlock1D(ppm_in_channels)
 
         # --- Decoder ---
-        self.decoder4 = DecoderBlock1D(ppm_in_channels, self.backbone.out_ch["C4"], decoder_channels[0])
-        self.decoder3 = DecoderBlock1D(decoder_channels[0], self.backbone.out_ch["C3"], decoder_channels[1])
-        self.decoder2 = DecoderBlock1D(decoder_channels[1], self.backbone.out_ch["C2"], decoder_channels[2])
+        self.decoder4 = DecoderBlock1D(ppm_in_channels, self.backbone.out_ch["C4"], decoder_channels[0], kernel_size=decoder_kernel)
+        self.decoder3 = DecoderBlock1D(decoder_channels[0], self.backbone.out_ch["C3"], decoder_channels[1], kernel_size=decoder_kernel)
+        self.decoder2 = DecoderBlock1D(decoder_channels[1], self.backbone.out_ch["C2"], decoder_channels[2], kernel_size=decoder_kernel)
 
         # --- Final Classifier ---
         self.final_conv = nn.Conv1d(decoder_channels[2], out_channels, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         input_size = x.size(-1)
-
-        # --- Encoder Path ---
         features = self.backbone(x)
         c2, c3, c4, c5 = features["C2"], features["C3"], features["C4"], features["C5"]
-
-        # --- Bottleneck Path ---
         b = self.ppm(c5)
         b = self.bottleneck_conv(b)
         b = self.bottleneck_attention(b)
-
-        # --- Decoder Path with Skip Connections ---
         d4 = self.decoder4(b, c4)
         d3 = self.decoder3(d4, c3)
         d2 = self.decoder2(d3, c2)
-
-        # --- Final Output ---
         y = self.final_conv(d2)
         y = F.interpolate(y, size=input_size, mode='linear', align_corners=False)
         return y
 
 
-# if __name__ == "__main__":
-#     torch.manual_seed(0)
-#     BATCH, T_LEN, IN_CH, NUM_CLASSES = 4, 5000, 8, 5
-#
-#     print("--- MA-Net Test ---")
-#     ma_model = MANet1D(
-#         in_channels=IN_CH,
-#         out_channels=NUM_CLASSES,
-#         stem_channels=32,
-#         stage_channels=(64, 128, 256, 256),
-#         decoder_channels=(128, 64, 32),
-#     )
-#
-#     output_train = ma_model(torch.randn(BATCH, IN_CH, T_LEN))
-#     print(f"MA-Net Train mode output shape: {output_train.shape}")
-#
-#     num_params = sum(p.numel() for p in ma_model.parameters() if p.requires_grad)
-#     print(f"MA-Net total parameters: {num_params / 1e6:.2f}M")
+# --- 테스트 ---
+if __name__ == "__main__":
+    torch.manual_seed(0)
+    BATCH, T_LEN, IN_CH, NUM_CLASSES = 4, 5000, 8, 5
+
+    print("--- MA-Net Test (Kernel Size Customization) ---")
+    ma_model = MANet1D(
+        in_channels=IN_CH,
+        out_channels=NUM_CLASSES,
+        stem_channels=32,
+        stage_channels=(64, 128, 256, 256),
+        decoder_channels=(128, 64, 32),
+        stem_kernel=50,
+        block_kernel=25,
+        decoder_kernel=10,
+        bottleneck_kernel=5
+    )
+
+    output_train = ma_model(torch.randn(BATCH, IN_CH, T_LEN))
+    print(f"MA-Net Train mode output shape: {output_train.shape}")
+
+    num_params = sum(p.numel() for p in ma_model.parameters() if p.requires_grad)
+    print(f"MA-Net total parameters: {num_params / 1e6:.2f}M")
