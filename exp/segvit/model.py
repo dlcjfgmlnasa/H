@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Single-modal 1D SegViT (ViT backbone + Token Pyramid + MLP decode head)."""
-
 from __future__ import annotations
 
 import math
-from typing import List, Sequence, Tuple
+from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -26,7 +24,7 @@ def right_unpad_1d(x: torch.Tensor, pad: int) -> torch.Tensor:
 
 
 def get_1d_sincos_pos_embed(embed_dim: int, t_len: int) -> torch.Tensor:
-    """Standard 1D sine-cos positional embedding. Returns (1, C, T)."""
+    """Standard 1D sine-cos positional embedding. Returns (1, T, C)."""
     assert embed_dim % 2 == 0, "embed_dim must be even for sin/cos."
     position = torch.arange(t_len).float()
     div_term = torch.exp(
@@ -35,13 +33,10 @@ def get_1d_sincos_pos_embed(embed_dim: int, t_len: int) -> torch.Tensor:
     pe = torch.zeros(t_len, embed_dim)
     pe[:, 0::2] = torch.sin(position[:, None] * div_term[None, :])
     pe[:, 1::2] = torch.cos(position[:, None] * div_term[None, :])
-    pe = pe.t().unsqueeze(0)
-    return pe
+    return pe.unsqueeze(0)
 
 
 class DropPath(nn.Module):
-    """Stochastic depth per sample (when applied in residual branch)."""
-
     def __init__(self, drop_prob: float = 0.0) -> None:
         super().__init__()
         self.drop_prob = float(drop_prob)
@@ -60,8 +55,6 @@ class DropPath(nn.Module):
 # ViT(1D) Components
 # -----------------------------------------------------------------------------
 class PatchEmbed1D(nn.Module):
-    """Overlapping/non-overlapping patch embedding for 1D signals."""
-
     def __init__(
             self,
             in_ch: int,
@@ -85,10 +78,12 @@ class PatchEmbed1D(nn.Module):
         self.stride = stride
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, C, T) -> proj -> (B, embed_dim, T_new)
         x = self.proj(x)
+        # (B, embed_dim, T_new) -> transpose -> (B, T_new, embed_dim) for LayerNorm
         x = x.transpose(1, 2)
         x = self.norm(x)
-        x = x.transpose(1, 2)
+        # Keep (B, T_new, embed_dim) for Transformer blocks
         return x
 
 
@@ -113,13 +108,16 @@ class MSA1D(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, T, C)
         b, t, c = x.shape
         qkv = self.qkv(x).reshape(b, t, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
+
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
+
         out = attn @ v
         out = out.transpose(1, 2).reshape(b, t, c)
         out = self.proj(out)
@@ -196,6 +194,7 @@ class ViTBackbone1D(nn.Module):
             use_overlap=use_overlap,
         )
         self.embed_dim = embed_dim
+        self.patch_size = patch_size
         dpr = torch.linspace(0, drop_path_rate, depth).tolist()
         self.blocks = nn.ModuleList(
             [
@@ -213,124 +212,124 @@ class ViTBackbone1D(nn.Module):
         self.norm = nn.LayerNorm(embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.patch(x)
-        t_len = x.shape[-1]
-        pe = get_1d_sincos_pos_embed(self.embed_dim, t_len).to(x.device)
-        x = x + pe
-        x = x.transpose(1, 2)
+        # x: (B, C, T_original)
+        x_patched = self.patch(x)
+        t_len_after_patch = x_patched.shape[1]
+
+        pe = get_1d_sincos_pos_embed(self.embed_dim, t_len_after_patch).to(x.device)
+        x_patched = x_patched + pe
+
         for blk in self.blocks:
-            x = blk(x)
-        x = self.norm(x)
-        x = x.transpose(1, 2)
-        return x
+            x_patched = blk(x_patched)
+
+        x_patched = self.norm(x_patched)  # (B, T_new, embed_dim)
+        return x_patched
 
 
 # -----------------------------------------------------------------------------
-# Neck and Head
+# ATM (Attention To Mask) Module for Query-based Segmentation
 # -----------------------------------------------------------------------------
-class TokenPyramid1D(nn.Module):
-    """Build S1..S4 by temporal pooling of ViT tokens + 1x1 conv projection."""
+class CrossAttention1D(nn.Module):
+    """Cross-attention module where Query is class embedding, Key/Value are image tokens."""
 
-    def __init__(
-            self,
-            in_dim: int,
-            stage_dims: Sequence[int] = (64, 128, 320, 512),
-    ) -> None:
+    def __init__(self, query_dim: int, kv_dim: int, num_heads: int = 8, drop: float = 0.0) -> None:
         super().__init__()
-        self.stage_dims = stage_dims
-        self.proj = nn.ModuleList(
-            [nn.Conv1d(in_dim, d, kernel_size=1, bias=False) for d in stage_dims]
-        )
-        self.bn = nn.ModuleList([nn.BatchNorm1d(d) for d in stage_dims])
-        self.act = nn.ModuleList([nn.ReLU(inplace=True) for _ in stage_dims])
+        assert query_dim % num_heads == 0 and kv_dim % num_heads == 0
+        self.num_heads = num_heads
+        self.head_dim = query_dim // num_heads
+        self.scale = self.head_dim ** -0.5
 
-    def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
-        b, e, t = x.shape
-        t2 = max(1, t // 2)
-        t4 = max(1, t // 4)
-        t8 = max(1, t // 8)
-        s1 = x
-        s2 = F.adaptive_avg_pool1d(x, t2)
-        s3 = F.adaptive_avg_pool1d(x, t4)
-        s4 = F.adaptive_avg_pool1d(x, t8)
-        outs_raw = [s1, s2, s3, s4]
-        outs: List[torch.Tensor] = []
-        for i, f in enumerate(outs_raw):
-            o = self.proj[i](f)
-            o = self.bn[i](o)
-            o = self.act[i](o)
-            outs.append(o)
-        return outs
+        self.q_proj = nn.Linear(query_dim, query_dim, bias=True)
+        self.k_proj = nn.Linear(kv_dim, kv_dim, bias=True)
+        self.v_proj = nn.Linear(kv_dim, kv_dim, bias=True)
+
+        self.proj_out = nn.Linear(query_dim, query_dim)
+        self.attn_drop = nn.Dropout(drop)
+        self.proj_drop = nn.Dropout(drop)
+
+    def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor) -> torch.Tensor:
+        b, n_cls, c_q = query.shape
+        _, t_enc, _ = key.shape
+
+        q = self.q_proj(query).reshape(b, n_cls, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
+        k = self.k_proj(key).reshape(b, t_enc, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
+        v = self.v_proj(value).reshape(b, t_enc, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        out = attn @ v
+        out = out.permute(0, 2, 1, 3).reshape(b, n_cls, c_q)
+        out = self.proj_out(out)
+        out = self.proj_drop(out)
+        return out
 
 
-class SegViTDecodeHead1D(nn.Module):
-    """Project each stage -> same dim, upsample to finest, concat, fuse, classify."""
-
-    def __init__(
-            self,
-            in_dims: Sequence[int],
-            decoder_dim: int = 256,
-            num_classes: int = 1,
-            dropout_p: float = 0.1,
-    ) -> None:
+class ATMModule(nn.Module):
+    """Attention To Mask module as described in the image."""
+    def __init__(self,
+                 embed_dim: int,
+                 num_heads: int,
+                 mlp_ratio: float = 4.0,
+                 drop_rate: float = 0.0,
+                 attn_drop_rate: float = 0.0) -> None:
         super().__init__()
-        self.proj = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.Conv1d(c, decoder_dim, 1, bias=False),
-                    nn.BatchNorm1d(decoder_dim),
-                    nn.ReLU(inplace=True),
-                )
-                for c in in_dims
-            ]
-        )
-        self.fuse = nn.Sequential(
-            nn.Conv1d(decoder_dim * len(in_dims), decoder_dim, 1, bias=False),
-            nn.BatchNorm1d(decoder_dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=dropout_p),
-        )
-        self.cls = nn.Conv1d(decoder_dim, num_classes, 1)
+        self.embed_dim = embed_dim
+        self.class_prediction_head = nn.Linear(embed_dim, 1)
 
-    def forward(self, feats: List[torch.Tensor], out_len: int) -> torch.Tensor:
-        ref_len = feats[0].shape[-1]
-        ups = []
-        for f, p in zip(feats, self.proj):
-            v = p(f)
-            if v.shape[-1] != ref_len:
-                v = F.interpolate(v, size=ref_len, mode="linear", align_corners=False)
-            ups.append(v)
-        x = torch.cat(ups, dim=1)
-        x = self.fuse(x)
-        x = self.cls(x)
-        if x.shape[-1] != out_len:
-            x = F.interpolate(x, size=out_len, mode="linear", align_corners=False)
-        return x
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.cross_attn = CrossAttention1D(
+            query_dim=embed_dim,
+            kv_dim=embed_dim,
+            num_heads=num_heads,
+            drop=attn_drop_rate
+        )
+        self.norm2 = nn.LayerNorm(embed_dim)
+        self.mlp = MLP(embed_dim, mlp_ratio, drop_rate)
+
+    def forward(self, class_queries: torch.Tensor, encoder_features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        queries = self.norm1(class_queries)
+        attn_output = self.cross_attn(queries, encoder_features, encoder_features)
+        class_queries = class_queries + attn_output
+
+        ff_output = self.mlp(self.norm2(class_queries))
+        class_queries = class_queries + ff_output
+
+        # 1. Class Predictions (FC in diagram)
+        class_logits = self.class_prediction_head(class_queries).squeeze(-1)
+
+        # 2. Generate Masks
+        norm_encoder_features = F.normalize(encoder_features, p=2, dim=-1)
+        norm_class_queries = F.normalize(class_queries, p=2, dim=-1)
+
+        mask_logits = norm_class_queries @ norm_encoder_features.transpose(1, 2)
+
+        return class_logits, mask_logits
 
 
 # -----------------------------------------------------------------------------
-# SegViT 1D
+# SegViT 1D (Modified with ATM)
 # -----------------------------------------------------------------------------
 class SegViT1D(nn.Module):
     def __init__(
-            self,
-            in_channels: int,
-            embed_dim: int,
-            depth: int,
-            num_heads: int,
-            mlp_ratio: float,
-            drop_rate: float,
-            attn_drop_rate: float,
-            drop_path_rate: float,
-            patch_size: int,
-            use_overlap: bool,
-            stage_dims: Sequence[int] = (64, 128, 128, 256),
-            decoder_dim: int = 256,
-            num_classes: int = 1,
+        self,
+        in_channels: int,
+        embed_dim: int,
+        depth: int,
+        num_heads: int,
+        mlp_ratio: float,
+        drop_rate: float,
+        attn_drop_rate: float,
+        drop_path_rate: float,
+        patch_size: int,
+        use_overlap: bool,
+        num_classes: int = 1,
     ) -> None:
         super().__init__()
+        self.num_classes = num_classes
 
-        # 1. Backbone
+        # 1. Backbone (ViT Encoder)
         self.backbone = ViTBackbone1D(in_channels=in_channels,
                                       embed_dim=embed_dim,
                                       depth=depth,
@@ -341,37 +340,30 @@ class SegViT1D(nn.Module):
                                       drop_path_rate=drop_path_rate,
                                       patch_size=patch_size,
                                       use_overlap=use_overlap)
-        embed_dim = self.backbone.embed_dim
 
-        # 2. Token Pyramid Neck
-        self.tpa = TokenPyramid1D(in_dim=embed_dim, stage_dims=stage_dims)
+        # 2. Class Queries (Learnable embeddings for each class)
+        self.class_queries = nn.Parameter(torch.randn(num_classes, embed_dim))
 
-        # 3. Decoder Head
-        self.decode_head = SegViTDecodeHead1D(
-            in_dims=stage_dims, decoder_dim=decoder_dim, num_classes=num_classes
+        # 3. ATM Decoder Head
+        self.atm_module = ATMModule(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            mlp_ratio=mlp_ratio,
+            drop_rate=drop_rate,
+            attn_drop_rate=attn_drop_rate
         )
-        self.norm = nn.BatchNorm1d(in_channels)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, C, T)
-        x = self.norm(x)
-        orig_len = x.shape[-1]
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        x, pad = pad_to_multiple_1d(x, multiple=self.backbone.patch_size)
 
-        # Pad input to be divisible by a safe multiple (e.g., 128)
-        x, pad = pad_to_multiple_1d(x, multiple=128)
+        encoder_features = self.backbone(x)
 
-        # Backbone -> Tokens
-        tokens = self.backbone(x)
+        batch_class_queries = self.class_queries.unsqueeze(0).repeat(x.shape[0], 1, 1)
 
-        # Tokens -> Pyramid Features
-        pyramid_features = self.tpa(tokens)
+        class_logits, masks = self.atm_module(batch_class_queries, encoder_features)
 
-        # Decode pyramid to logits
-        logits = self.decode_head(pyramid_features, out_len=x.shape[-1])
+        if masks.shape[-1] != x.shape[-1]:  # Use padded length for interpolation
+            masks = F.interpolate(masks, size=x.shape[-1], mode="linear", align_corners=False)
 
-        # Unpad to match original input length
-        logits = right_unpad_1d(logits, pad)
-
-        assert logits.shape[-1] == orig_len, "Output length must match input length"
-        return logits
-
+        masks = right_unpad_1d(masks, pad)
+        return masks
