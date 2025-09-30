@@ -284,27 +284,62 @@ class NinaproDataset(SlidingWindowDataset):
         data_np = {k: self.data_dict[k][idx] for k in self.signal_cols}
         mask_np = self.mask_arr[idx]
 
-        hand_open_labels = [6]
-        hand_close_labels = [5, 22, 23, 24, 25]
-        pinch_labels = [7, 8, 9, 10, 18, 19, 20, 21, 32]
-        wrist_labels = [12, 13, 14]
+        mask_np[mask_np > 0] = 1    # TODO : 0 / 1
+        # # -----------------------------
+        # hand_open_labels = [6]
+        # hand_close_labels = [5, 22, 23, 24, 25]
+        # pinch_labels = [7, 8, 9, 10, 18, 19, 20, 21, 32]
+        # wrist_labels = [12, 13, 14]
+        #
+        # conditions = [
+        #     np.isin(mask_np, hand_open_labels),
+        #     np.isin(mask_np, hand_close_labels),
+        #     np.isin(mask_np, pinch_labels),
+        #     np.isin(mask_np, wrist_labels),
+        # ]
+        #
+        # choices = [1, 2, 3, 4]
+        # y_remapped = np.select(conditions, choices, default=-1)
+        # y_remapped[mask_np == 0] = 0  # 휴식 클래스(0)는 확실하게 0으로 지정
+        #
+        # # mask_np[mask_np == 4] = 2
+        # # mask_np[mask_np == 5] = 0
+        # # mask_np[mask_np == 6] = 0
+        # # mask_np[mask_np == 7] = 0
+        # mask_np = y_remapped
 
-        conditions = [
-            np.isin(mask_np, hand_open_labels),
-            np.isin(mask_np, hand_close_labels),
-            np.isin(mask_np, pinch_labels),
-            np.isin(mask_np, wrist_labels),
-        ]
+        data = {k: torch.tensor(v, dtype=torch.float32) for k, v in data_np.items()}
+        mask = torch.tensor(mask_np, dtype=torch.long)
+        return data, mask
 
-        choices = [1, 2, 3, 4]
-        y_remapped = np.select(conditions, choices, default=-1)
-        y_remapped[mask_np == 0] = 0  # 휴식 클래스(0)는 확실하게 0으로 지정
 
-        # mask_np[mask_np == 4] = 2
-        # mask_np[mask_np == 5] = 0
-        # mask_np[mask_np == 6] = 0
-        # mask_np[mask_np == 7] = 0
-        mask_np = y_remapped
+class HeartSoundDataset(SlidingWindowDataset):
+    def __init__(
+            self,
+            base_path: str = "/data/segmentation/heartsound_f2",
+            train: bool = True,
+            fs: int = 500,
+            second: float = 10,
+            down_sampling: bool = False,
+            sliding_window_sec: float = 1,
+            train_ratio: float = 0.8,
+    ):
+        super().__init__(
+            base_path=base_path,
+            signal_cols=("heart_sound", ),
+            down_sampling=down_sampling,
+            train=train,
+            train_ratio=train_ratio,
+            fs=fs,
+            window_sec=second,
+            step_sec=sliding_window_sec,
+        )
+        self.channel_num = 3
+        self.class_num = 2
+
+    def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+        data_np = {k: self.data_dict[k][idx] for k in self.signal_cols}
+        mask_np = self.mask_arr[idx] - 1
 
         data = {k: torch.tensor(v, dtype=torch.float32) for k, v in data_np.items()}
         mask = torch.tensor(mask_np, dtype=torch.long)
@@ -312,9 +347,9 @@ class NinaproDataset(SlidingWindowDataset):
 
 
 if __name__ == "__main__":
-    ds = NinaproDataset()
-    for d in ds:
-        print(d)
+    ds = HeartSoundDataset()
+    for d, m in ds:
+        print(set(m.tolist()))
 
     # ds2 = HeartbeatDataset(
     #     base_path="/data/segmentation/mit_bit",

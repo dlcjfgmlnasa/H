@@ -96,19 +96,42 @@ def get_dataset(name: str):
         class_num = 5             # [0: normal, 1: not normal]
 
         train_dataset = NinaproDataset(
-            base_path='/data/segmentation/ninapro_f2',
-            fs=1000,
-            second=10,
-            sliding_window_sec=10,
+            base_path='/data/segmentation/ninapro_f3',
+            fs=500,
+            second=50,
+            sliding_window_sec=50,
             train_ratio=0.8,
             train=True,
             down_sampling=False
         )
         eval_dataset = NinaproDataset(
-            base_path='/data/segmentation/ninapro_f2',
-            fs=1000,
-            second=10,
+            base_path='/data/segmentation/ninapro_f3',
+            fs=500,
+            second=50,
+            sliding_window_sec=50,
+            train_ratio=0.8,
+            train=False,
+        )
+        return (train_dataset, eval_dataset), (channel_num, class_num)
+
+    elif name == 'heartsound':
+        from data.data_loader import HeartSoundDataset
+        channel_num = 1    # [EMG_1, EMG_2, EMG_3, ... ]
+        class_num = 4      # [0: normal, 1: not normal]
+        train_dataset = HeartSoundDataset(
+            base_path='/data/segmentation/heartsound_f2',
+            fs=500,
+            second=20,
             sliding_window_sec=10,
+            train_ratio=0.8,
+            train=True,
+            down_sampling=False
+        )
+        eval_dataset = HeartSoundDataset(
+            base_path='/data/segmentation/heartsound_f2',
+            fs=500,
+            second=20,
+            sliding_window_sec=20,
             train_ratio=0.8,
             train=False,
         )
