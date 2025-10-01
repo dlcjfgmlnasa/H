@@ -1,10 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-1D Swin-Unet (PyTorch) with configurable patch_size & window_size.
-
-This script implements a 1D version of the Swin-Unet architecture using PyTorch
-for sequence segmentation tasks.
-"""
 from __future__ import annotations
 from typing import List, Tuple
 
@@ -14,7 +8,6 @@ import torch.nn.functional as F
 
 
 def pad_to_multiple_length(x: torch.Tensor, multiple: int) -> Tuple[torch.Tensor, int]:
-    """Right-pad the last dimension of a tensor to a multiple of a given length."""
     input_length = x.size(-1)
     pad = (multiple - (input_length % multiple)) % multiple
     if pad:
@@ -23,12 +16,10 @@ def pad_to_multiple_length(x: torch.Tensor, multiple: int) -> Tuple[torch.Tensor
 
 
 def right_unpad_length(x: torch.Tensor, pad: int) -> torch.Tensor:
-    """Remove right padding from the last dimension of a tensor."""
     return x[..., :-pad] if pad else x
 
 
 def window_partition_1d(x: torch.Tensor, window_size: int) -> Tuple[torch.Tensor, int]:
-    """Partition a 1D sequence into non-overlapping windows."""
     batch_size, num_tokens, channels = x.shape
     pad_len = (window_size - (num_tokens % window_size)) % window_size
     if pad_len:
@@ -44,7 +35,6 @@ def window_partition_1d(x: torch.Tensor, window_size: int) -> Tuple[torch.Tensor
 def window_reverse_1d(
     windows: torch.Tensor, batch_size: int, num_tokens: int, window_size: int, pad_len: int
 ) -> torch.Tensor:
-    """Reverse the window partitioning operation."""
     num_windows = (num_tokens + pad_len) // window_size
     x = windows.view(batch_size, num_windows, window_size, -1).reshape(
         batch_size, num_windows * window_size, -1
